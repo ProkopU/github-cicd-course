@@ -7,33 +7,59 @@ on:
         description: 'Message'
         required: true
         default: 'Hello CI/CD'
-      # TODO: add tag input
+      tag:
+        description: 'Docker Image Tag'
+        required: true
+        default: 'latest'
+
 permissions:
   contents: read
   packages: write
 
 jobs:
   docker:
-    runs-on: "ubuntu-latest"
+    runs-on: ubuntu-latest
     name: Docker build
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
-      - name: Replace message in index.hml
+
+      - name: Replace message in index.html
         run: sed -i "s#DEFAULT_MESSAGE#${{ inputs.message }}#" ./task_b/index.html
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
       - name: Log in to GitHub container registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io/${{ github.repository }}
+          registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN  }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
-          tags: type=ref,event=tag
-      # TODO: build and push docker image
-  # TODO: Add test job
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=${{ inputs.tag }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ github.repository }}:${{ inputs.tag }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  test:
+    runs-on: ubuntu-latest
+    name: Test Docker Image
+    needs: docker
+    steps:
+      - name: Pull and Test Docker Image
+        run: |
+          docker pull ghcr.io/${{ github.repository }}:${{ inputs.tag }}
+          docker run --rm ghcr.io/${{ github.repository }}:${{ inputs.tag }} echo "Test Successful!"
